@@ -143,4 +143,5 @@ def build_demo() -> gr.Blocks:
 
 
 def main():
-    build_demo().launch()
+    # footer_links=[] hides Gradio's developer footer (API docs, "Built with Gradio", settings and their icons)
+    build_demo().launch(footer_links=[])
