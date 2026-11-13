@@ -11,6 +11,7 @@ never have to activate the environment. Run with:
 import argparse
 import os
 import platform
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -19,7 +20,8 @@ from pathlib import Path
 # re-exec'd venv python, etc.) when stdout isn't a terminal, e.g. redirected
 # to a log file. Without this, each process's buffer can flush at a
 # different time and interleave output out of order.
-sys.stdout.reconfigure(line_buffering=True)
+if hasattr(sys.stdout, "reconfigure"):  # missing when stdout is captured, e.g. under pytest
+    sys.stdout.reconfigure(line_buffering=True)
 
 MIN_PY = (3, 10)
 MAX_PY = (3, 14)
@@ -42,12 +44,95 @@ def run(cmd):
     subprocess.run(cmd, check=True)
 
 
-def check_python():
+def _supported(version) -> bool:
+    return version is not None and MIN_PY <= tuple(version[:2]) <= MAX_PY
+
+
+def _version_of(cmd):
+    """(major, minor) of the Python that `cmd` runs, or None if it doesn't run."""
+    try:
+        out = subprocess.run(
+            cmd + ["-c", "import sys; print(sys.version_info[0], sys.version_info[1])"],
+            capture_output=True, text=True, timeout=30,
+        )
+        major, minor = out.stdout.split()
+        return int(major), int(minor)
+    except Exception:
+        return None
+
+
+def _candidate_pythons():
+    """Commands for other Pythons that may be on this computer, best first."""
+    system = platform.system()
+    minors = range(MAX_PY[1], MIN_PY[1] - 1, -1)  # newest first
+    cands = []
+
+    if venv_python().exists():  # a previous install already picked a good one
+        cands.append([str(venv_python())])
+    if system == "Windows":
+        cands += [["py", f"-3.{m}"] for m in minors]  # the python.org launcher
+    for m in minors:
+        exe = shutil.which(f"python3.{m}")
+        if exe:
+            cands.append([exe])
+    if system == "Darwin":
+        for m in minors:
+            for folder in ("/opt/homebrew/bin", "/usr/local/bin",
+                           f"/Library/Frameworks/Python.framework/Versions/3.{m}/bin"):
+                exe = Path(folder) / f"python3.{m}"
+                if exe.exists():
+                    cands.append([str(exe)])
+    # Pythons installed by the uv tool
+    uv_root = (Path(os.environ.get("APPDATA", "")) / "uv" / "python" if system == "Windows"
+               else Path.home() / ".local" / "share" / "uv" / "python")
+    if uv_root.is_dir():
+        for d in sorted(uv_root.glob("cpython-3.*"), reverse=True):
+            for exe in (d / "python.exe", d / "bin" / "python3"):
+                if exe.exists():
+                    cands.append([str(exe)])
+    for name in ("python3", "python"):
+        exe = shutil.which(name)
+        if exe:
+            cands.append([exe])
+
+    seen, unique = set(), []
+    for c in cands:
+        key = " ".join(c)
+        if key not in seen:
+            seen.add(key)
+            unique.append(c)
+    return unique
+
+
+def _install_hint() -> str:
+    want = f"3.{MAX_PY[1] - 1}"
+    system = platform.system()
+    if system == "Darwin" and shutil.which("brew"):
+        return f"  brew install python@{want}"
+    if shutil.which("uv"):
+        return f"  uv python install {want}"
+    if system == "Windows":
+        return f"  winget install Python.Python.{want}\nor download it from https://www.python.org/downloads/"
+    if system == "Linux":
+        return "Install it with your package manager, or from https://www.python.org/downloads/"
+    return "Download it from https://www.python.org/downloads/"
+
+
+def check_python(argv):
+    """If this Python is too old or too new, re-run the installer with a better one."""
     v = sys.version_info
-    if not (MIN_PY <= v[:2] <= MAX_PY):
-        print(f"mygpt needs Python {MIN_PY[0]}.{MIN_PY[1]} to {MAX_PY[0]}.{MAX_PY[1]}, found {v.major}.{v.minor}.")
-        print("Install a supported Python from https://www.python.org/downloads/ and run this again.")
-        sys.exit(1)
+    if _supported(v):
+        return
+    need = f"{MIN_PY[0]}.{MIN_PY[1]} to {MAX_PY[0]}.{MAX_PY[1]}"
+    print(f"This is Python {v.major}.{v.minor}, but mygpt needs Python {need}. Looking for another one...")
+    for cmd in _candidate_pythons():
+        found = _version_of(cmd)
+        if _supported(found):
+            print(f"Found Python {found[0]}.{found[1]}: {' '.join(cmd)}")
+            sys.exit(subprocess.run(cmd + [str(Path(__file__).resolve())] + list(argv)).returncode)
+    print(f"\nNo Python {need} found on this computer. Install one, then run this again:")
+    print(_install_hint())
+    sys.exit(1)
 
 
 def ensure_venv_and_reexec(argv):
@@ -277,7 +362,7 @@ def main():
                         help="Don't add a global 'mygpt' command; you'll activate .venv yourself instead.")
     args = parser.parse_args()
 
-    check_python()
+    check_python(sys.argv[1:])
     ensure_venv_and_reexec(sys.argv[1:])
 
     python = sys.executable

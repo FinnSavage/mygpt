@@ -1,0 +1,89 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  tests:
+    name: tests (${{ matrix.os }}, Python ${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+        python: ["3.12"]
+        include:
+          - os: ubuntu-latest
+            python: "3.10"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install PyTorch (CPU)
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            python -m pip install torch
+          else
+            python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          fi
+
+      - name: Install mygpt
+        run: python -m pip install -e ".[test]"
+
+      - name: Run tests
+        run: python -m pytest -v
+
+  installer:
+    name: installer (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # the real one-step install a new user would run, including the global command
+      - name: Run install.py
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            python install.py
+          else
+            python install.py --cpu
+          fi
+
+      - name: Global command works from another folder (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        working-directory: ${{ runner.temp }}
+        run: |
+          & "$env:LOCALAPPDATA\mygpt\bin\mygpt.cmd" doctor
+          & "$env:LOCALAPPDATA\mygpt\bin\mygpt.cmd" datasets
+          $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+          if ($userPath -notlike "*mygpt\bin*") { throw "mygpt\bin was not added to the user PATH" }
+
+      - name: Global command works from another folder (Mac/Linux)
+        if: runner.os != 'Windows'
+        shell: bash
+        working-directory: ${{ runner.temp }}
+        run: |
+          ~/.local/bin/mygpt doctor
+          ~/.local/bin/mygpt datasets
+
+      - name: Short training run and generation
+        shell: bash
+        working-directory: ${{ runner.temp }}
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then MYGPT="$LOCALAPPDATA/mygpt/bin/mygpt.cmd"; else MYGPT=~/.local/bin/mygpt; fi
+          "$MYGPT" train --steps 20
+          "$MYGPT" generate "" --tokens 50
+          test ! -e runs  # datasets and runs must go in the project folder, not here

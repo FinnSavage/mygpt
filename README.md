@@ -1,5 +1,7 @@
 # mygpt
 
+[![tests](https://github.com/FinnSavage/mygpt/actions/workflows/tests.yml/badge.svg)](https://github.com/FinnSavage/mygpt/actions/workflows/tests.yml)
+
 *Your own GPT, trained on your own machine, on your own words.*
 
 A small, complete, cross-platform GPT (nanoGPT-style) that trains and talks
@@ -71,6 +73,17 @@ code with no hidden state.
 | `mygpt/cli.py` | The `mygpt` command |
 | `mygpt/ui.py` | Browser UI (Gradio) |
 | `install.py` | One-step installer |
+
+## Running the tests
+
+```
+.venv/bin/python -m pip install -e ".[test]"      # Windows: .venv\Scripts\python
+.venv/bin/python -m pytest
+```
+
+The suite runs offline in a few seconds per test, in a throwaway folder, so
+it never touches your own `data/` or `runs/`. GitHub Actions runs it, plus
+the real installer, on Windows, macOS, and Linux for every push.
 
 ## Credits
 

@@ -13,8 +13,14 @@ dependencies = [
     "pandas",
 ]
 
+[project.optional-dependencies]
+test = ["pytest"]
+
 [project.scripts]
 mygpt = "mygpt.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["mygpt*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
